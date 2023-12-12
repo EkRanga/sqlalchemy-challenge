@@ -1,0 +1,169 @@
+import numpy as np
+from datetime import datetime, timedelta
+import sqlalchemy
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, func
+
+from flask import Flask, jsonify, request
+
+#################################################
+# Database Setup
+#################################################
+engine = create_engine("sqlite:///Resources/hawaii.sqlite")
+
+# reflect an existing database into a new model
+Base = automap_base()
+# reflect the tables
+Base.prepare(engine, reflect=True)
+
+# Save references to the tables
+measurement = Base.classes.measurement
+station = Base.classes.station
+
+#################################################
+# Flask Setup
+#################################################
+app = Flask(__name__)
+#################################################
+# Flask Routes
+#################################################
+
+@app.route("/")
+def Welcome():
+    """List all available api routes."""
+    return (
+        f"Available Routes:<br/>"
+        f"/api/v1.0/stations<br/>"
+        f"/api/v1.0/precipitation<br/>"
+        f"/api/v1.0/tobs<br/>"
+        f"/api/v1.0/<start><br/>"
+        f"/api/v1.0/<start><end>"
+         )
+
+
+@app.route("/api/v1.0/stations")
+def stations():
+    # Create our session (link) from Python to the DB
+    session = Session(engine)
+    s_results = session.query(station.name,station.latitude,station.longitude,station.elevation).all()
+
+    session.close()
+
+    # Convert list of tuples into normal list
+    all_station = list(np.ravel(s_results))
+    return jsonify(all_station)
+
+@app.route("/api/v1.0/precipitation")
+def precipitation():
+    # Create our session (link) from Python to the DB
+    session = Session(engine)
+
+    """Return a list of measurement data including the  date and prcp of each station"""
+    # Query all measurements
+    results = session.query(measurement.date, measurement.prcp).all()
+
+
+    session.close()
+
+    # Create a list of dictionaries
+    all_measurements = []
+    for date, prcp in results:
+        measurement_dict = {}
+        measurement_dict[date] = prcp
+              
+        all_measurements.append(measurement_dict)
+
+    return jsonify(all_measurements)
+
+    # Create a list of dictionaries
+        # Query all measurements
+    results = session.query(measurement.date).all()
+    temperature_data = []
+    for date, in results:
+        temperature_dict = {}
+        temperature_data.append(temperature_dict)
+
+    return jsonify(all_measurements)   
+              
+
+@app.route("/api/v1.0/tobs")
+def tobs():
+    # Create our session (link) from Python to the DB
+    session = Session(engine)
+
+    """Return a list of measurement data including the  date and prcp of each station"""
+    # Query all measurements
+# Step 1: Identify the most recent date in the dataset
+    latest_date_query = session.query(func.max(measurement.date)).scalar()
+    latest_date = datetime.strptime(latest_date_query, '%Y-%m-%d')  # Convert to datetime object
+# latest_date
+# #Step 2: Calculate the date that is exactly 12 months before the most recent date
+    one_year_ago = latest_date - timedelta(days=365)
+
+# # Step 3: Query the database for precipitation data within the date range
+    last_12_months_prcp = session.query(measurement.date, measurement.prcp).\
+        filter(measurement.date >= one_year_ago.strftime('%Y-%m-%d'),measurement.date <= latest_date.strftime('%Y-%m-%d')).all()
+                
+    session.close()
+    prcp = list(np.ravel(last_12_months_prcp))
+    return jsonify(prcp)
+
+
+@app.route('/api/v1.0/<start>', methods=['GET'])
+def get_temperature_by_start_date(start):
+    session = Session(engine)
+    start_date=request.args.get('start')
+    latest_date = datetime.strptime(start_date, '%Y-%m-%d')  # Convert to datetime object
+
+    last_12_months_prcp = session.query(measurement.date,func.max(measurement.tobs),func.min(measurement.tobs),func.avg(measurement.tobs)).\
+        filter(measurement.date == latest_date.strftime('%Y-%m-%d')).all()
+                
+    session.close()
+    prcp = list(np.ravel(last_12_months_prcp))
+    return jsonify(prcp)
+
+
+@app.route('/api/v1.0/<start>/<end>', methods=['GET'])
+def get_temperature_by_date_range(start, end):
+    try:
+        start_date = datetime.strptime(start, '%Y-%m-%d')  # Convert to datetime object
+        end_date = datetime.strptime(end, '%Y-%m-%d')  # Convert to datetime object
+
+        session = Session(engine)
+
+        temperatures = session.query(
+            func.min(measurement.tobs).label('min_temperature'),
+            func.avg(measurement.tobs).label('avg_temperature'),
+            func.max(measurement.tobs).label('max_temperature')
+        ).filter(measurement.date.between(start_date, end_date)).all()
+
+        session.close()
+
+        if not temperatures:
+            return jsonify({'error': 'No data available for the specified date range'}), 404
+
+        result = {
+            'min_temperature': temperatures[0].min_temperature,
+            'avg_temperature': temperatures[0].avg_temperature,
+            'max_temperature': temperatures[0].max_temperature
+        }
+
+        return jsonify(result)
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400  # Bad Request for invalid date format
+
+    result = {
+        'min_temperature': temperatures[0].min_temperature,
+        'avg_temperature': temperatures[0].avg_temperature,
+        'max_temperature': temperatures[0].max_temperature
+    }
+
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+    
+    
+   
